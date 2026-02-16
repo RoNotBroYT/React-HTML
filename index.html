@@ -198,7 +198,7 @@ function App() {
           React.createElement(Button, { onClick: showMyLocation, disabled: isLoadingLocation, variant:"secondary", className:"w-full" }, React.createElement(MapPin,{className:"h-4 w-4 mr-2"}), isLoadingLocation?"Getting location...":"Show My Location"),
           React.createElement(Button, { onClick: clearMarkers, variant:"destructive", className:"w-full text-xs" }, "Clear Markers"),
           React.createElement(Button, { onClick: ()=>setRadarEnabled(!radarEnabled), variant: radarEnabled?"default":"outline", className:"w-full text-xs" }, radarEnabled?"Radar: ON":"Radar: OFF"),
-          React.createElement(Button, { onClick: radarAnimating?pauseRadar:startRadarAnimation, variant:"outline", className:"w-full text-xs" }, radarAnimating?(radarPaused?"Resume Radar":"Pause Radar"):"Play Radar")
+          React.createElement(Button, { onClick: radarAnimating?(radarPaused?resumeRadar:pauseRadar):startRadarAnimation, variant:"outline", className:"w-full text-xs" }, radarAnimating?(radarPaused?"Resume Radar":"Pause Radar"):"Play Radar")
         )
       )
     ),

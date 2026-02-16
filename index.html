@@ -3,8 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <title>Live Weather Map</title>
+
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-  <link rel="stylesheet" href="https://esm.sh/leaflet@1.9.4/dist/leaflet.css" />
+
+  <link
+    rel="stylesheet"
+    href="https://esm.sh/leaflet@1.9.4/dist/leaflet.css"
+  />
+
   <script type="importmap">
     {
       "imports": {
@@ -16,18 +22,21 @@
       }
     }
   </script>
+
   <style>
     body { margin: 0; font-family: system-ui; }
     #map { height: 100vh; width: 100%; }
   </style>
 </head>
+
 <body>
   <div id="root"></div>
+
   <script type="module">
     import React, { useEffect, useRef, useState } from "react"
     import { createRoot } from "react-dom/client"
     import L from "https://esm.sh/leaflet@1.9.4"
-    import { CloudRain, Sun, Wind, MapPin, Crosshair, AlertCircle, Play, Pause } from "lucide-react"
+    import { CloudRain, Sun, Wind, MapPin, Crosshair, AlertCircle } from "lucide-react"
     import {
       Button,
       Card,
@@ -54,51 +63,74 @@
       const [cursorMode, setCursorMode] = useState(true)
       const [isLoadingLocation, setIsLoadingLocation] = useState(false)
       const [locationError, setLocationError] = useState(null)
+      const [lastLocation, setLastLocation] = useState(null)
       const [radarEnabled, setRadarEnabled] = useState(true)
       const [radarAnimating, setRadarAnimating] = useState(false)
-      const [radarPaused, setRadarPaused] = useState(false)
+      const [radarTimestamps, setRadarTimestamps] = useState([])
       const [radarFrame, setRadarFrame] = useState(0)
-      const [timestamps, setTimestamps] = useState([])
+      const [radarPaused, setRadarPaused] = useState(false)
 
       useEffect(() => {
         if (!mapInstance.current) {
           mapInstance.current = L.map(mapRef.current).setView([51.505, -0.09], 6)
-          L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "&copy; OpenStreetMap contributors" }).addTo(mapInstance.current)
-          radarLayer.current = L.tileLayer("https://tilecache.rainviewer.com/v2/radar/latest/256/{z}/{x}/{y}/2/1_1.png", { opacity: 0.6 }).addTo(mapInstance.current)
-          mapInstance.current.on("click", (e) => { if (cursorMode) addMarker(e.latlng.lat, e.latlng.lng) })
+          L.tileLayer(
+            "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+            { attribution: "&copy; OpenStreetMap contributors" }
+          ).addTo(mapInstance.current)
+          radarLayer.current = L.tileLayer(
+            "https://tilecache.rainviewer.com/v2/radar/latest/256/{z}/{x}/{y}/2/1_1.png",
+            { opacity: 0.6 }
+          ).addTo(mapInstance.current)
+
+          mapInstance.current.on("click", (e) => {
+            if (cursorMode) addMarker(e.latlng.lat, e.latlng.lng)
+          })
         }
       }, [cursorMode])
 
       useEffect(() => {
         if (radarLayer.current) {
-          if (radarEnabled) mapInstance.current.addLayer(radarLayer.current)
-          else mapInstance.current.removeLayer(radarLayer.current)
+          radarEnabled
+            ? mapInstance.current.addLayer(radarLayer.current)
+            : mapInstance.current.removeLayer(radarLayer.current)
         }
       }, [radarEnabled])
 
-      useEffect(() => {
-        if (radarAnimating && !radarPaused && timestamps.length > 0) {
-          radarAnimationRef.current = setTimeout(() => {
-            const nextFrame = (radarFrame + 1) % timestamps.length
-            if (radarLayer.current) radarLayer.current.setUrl(`https://tilecache.rainviewer.com/v2/radar/${timestamps[nextFrame]}/256/{z}/{x}/{y}/2/1_1.png`)
-            setRadarFrame(nextFrame)
-          }, 500)
-        }
-        return () => clearTimeout(radarAnimationRef.current)
-      }, [radarFrame, radarAnimating, radarPaused, timestamps])
-
-      function startRadarAnimation() {
-        const now = Math.floor(Date.now() / 1000)
-        const frames = []
-        for (let i = 30; i >= 0; i -= 5) frames.push(now - i * 60)
-        setTimestamps(frames)
-        setRadarFrame(0)
-        setRadarAnimating(true)
-        setRadarPaused(false)
+      function updateRadarFrame(frameIndex) {
+        if (!radarTimestamps.length) return
+        const timestamp = radarTimestamps[frameIndex % radarTimestamps.length]
+        const url = `https://tilecache.rainviewer.com/v2/radar/${timestamp}/256/{z}/{x}/{y}/2/1_1.png`
+        radarLayer.current.setUrl(url)
+        setRadarFrame(frameIndex)
       }
 
-      function pauseRadar() { setRadarPaused(true) }
-      function resumeRadar() { setRadarPaused(false) }
+      function playRadarAnimation() {
+        if (!radarTimestamps.length) {
+          const now = Math.floor(Date.now() / 1000)
+          const timestamps = []
+          for (let i = 30; i >= 0; i -= 5) timestamps.push(now - i * 60)
+          setRadarTimestamps(timestamps)
+        }
+
+        setRadarAnimating(true)
+        setRadarPaused(false)
+
+        const animate = () => {
+          if (!radarAnimating || radarPaused) return
+          updateRadarFrame((radarFrame + 1) % radarTimestamps.length)
+          radarAnimationRef.current = setTimeout(animate, 500)
+        }
+        animate()
+      }
+
+      function pauseRadar() {
+        setRadarPaused(true)
+      }
+
+      function resumeRadar() {
+        setRadarPaused(false)
+        playRadarAnimation()
+      }
 
       function clearMarkers() {
         markersRef.current.forEach(marker => mapInstance.current.removeLayer(marker))
@@ -113,10 +145,19 @@
           if (!res.ok) throw new Error("Failed to fetch weather")
           const data = await res.json()
           const current = data.current_weather
-          setWeather({ temp: current.temperature, wind: current.windspeed, rain: current.weathercode >= 51, lat: lat.toFixed(4), lng: lng.toFixed(4) })
+          setWeather({
+            temp: current.temperature,
+            wind: current.windspeed,
+            rain: current.weathercode >= 51,
+            lat: lat.toFixed(4),
+            lng: lng.toFixed(4)
+          })
+          setLastLocation({ lat, lng })
+          setLocationError(null)
           marker.bindPopup(`<b>${current.temperature}°C</b><br/>Wind: ${current.windspeed} km/h`).openPopup()
-        } catch (err) {
+        } catch (error) {
           setLocationError("Failed to fetch weather data. Try again.")
+          console.error(error)
         }
       }
 
@@ -129,14 +170,25 @@
           return
         }
         navigator.geolocation.getCurrentPosition(
-          ({ coords: { latitude, longitude } }) => {
+          (pos) => {
+            const { latitude, longitude } = pos.coords
             if (userMarker.current) userMarker.current.setLatLng([latitude, longitude])
-            else userMarker.current = L.marker([latitude, longitude], { title:"You are here", icon:L.icon({ iconUrl:"https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png", iconSize:[25,41], iconAnchor:[12,41], popupAnchor:[1,-34] }) }).addTo(mapInstance.current).bindPopup("<b>Your Location</b>").openPopup()
+            else {
+              userMarker.current = L.marker([latitude, longitude], {
+                title: "You are here",
+                icon: L.icon({
+                  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png",
+                  iconSize: [25, 41],
+                  iconAnchor: [12, 41],
+                  popupAnchor: [1, -34]
+                })
+              }).addTo(mapInstance.current).bindPopup("<b>Your Location</b>").openPopup()
+            }
             mapInstance.current.setView([latitude, longitude], 10)
             addMarker(latitude, longitude)
             setIsLoadingLocation(false)
           },
-          err => {
+          (err) => {
             let msg = "Could not get your location"
             if (err.code === 1) msg = "Permission denied. Please enable location access."
             else if (err.code === 2) msg = "Position unavailable. Try again."
@@ -147,32 +199,26 @@
         )
       }
 
-      return React.createElement(
-        React.Fragment,
-        null,
-        React.createElement("div", { style: { position:"absolute", top:"20px", left:"20px", zIndex:1000, width:"320px" } },
+      return React.createElement(React.Fragment, null,
+        React.createElement("div", { style:{ position:"absolute", top:"20px", left:"20px", zIndex:1000, width:"320px" }},
           React.createElement(Card, { className:"w-full" },
             React.createElement(CardHeader, null,
-              React.createElement(CardTitle, null,"Weather Explorer"),
-              React.createElement(CardDescription, null,"Click on map or use your location")
+              React.createElement(CardTitle, null, "Weather Explorer"),
+              React.createElement(CardDescription, null, "Click on map or use your location")
             ),
             React.createElement(CardContent, { className:"space-y-3" },
               React.createElement("div", { className:"space-y-2" },
-                React.createElement(Button, { onClick:()=>setCursorMode(!cursorMode), variant: cursorMode?"default":"outline", className:"w-full" },
+                React.createElement(Button, { onClick: ()=>setCursorMode(!cursorMode), variant: cursorMode?"default":"outline", className:"w-full" },
                   React.createElement(Crosshair, { className:"h-4 w-4 mr-2" }),
                   cursorMode ? "Cursor Marker: ON" : "Cursor Marker: OFF"
                 ),
-                React.createElement(Button, { onClick: showMyLocation, disabled:isLoadingLocation, variant:"secondary", className:"w-full" },
+                React.createElement(Button, { onClick: showMyLocation, disabled: isLoadingLocation, variant:"secondary", className:"w-full" },
                   React.createElement(MapPin, { className:"h-4 w-4 mr-2" }),
                   isLoadingLocation ? "Getting location..." : "Show My Location"
                 ),
-                React.createElement(Button, { onClick: clearMarkers, variant:"destructive", className:"w-full text-xs" },"Clear Markers"),
-                React.createElement(Button, { onClick:()=>setRadarEnabled(!radarEnabled), variant: radarEnabled?"default":"outline", className:"w-full text-xs" },
-                  radarEnabled ? "Radar: ON" : "Radar: OFF"
-                ),
-                React.createElement(Button, { onClick:startRadarAnimation, disabled:radarAnimating, variant:"outline", className:"w-full text-xs" },
-                  radarAnimating ? "Playing..." : "Play Radar"
-                )
+                React.createElement(Button, { onClick: clearMarkers, variant:"destructive", className:"w-full text-xs" }, "Clear Markers"),
+                React.createElement(Button, { onClick: ()=>setRadarEnabled(!radarEnabled), variant: radarEnabled?"default":"outline", className:"w-full text-xs" }, radarEnabled?"Radar: ON":"Radar: OFF"),
+                React.createElement(Button, { onClick: radarAnimating?pauseRadar:playRadarAnimation, variant:"outline", className:"w-full text-xs" }, radarAnimating?(radarPaused?"Paused":"Playing"):"Play Radar")
               ),
               locationError && React.createElement("div", { className:"flex items-center gap-2 p-2 bg-destructive/10 text-destructive text-sm rounded" },
                 React.createElement(AlertCircle, { className:"h-4 w-4 flex-shrink-0" }),
@@ -180,45 +226,38 @@
               ),
               weather && React.createElement("div", { className:"space-y-2 pt-2 border-t" },
                 React.createElement("div", { className:"flex items-center gap-2" },
-                  weather.rain ? React.createElement(CloudRain,{className:"h-5 w-5 text-blue-500"}) : React.createElement(Sun,{className:"h-5 w-5 text-yellow-500"}),
+                  weather.rain ? React.createElement(CloudRain, { className:"h-5 w-5 text-blue-500" }) : React.createElement(Sun, { className:"h-5 w-5 text-yellow-500" }),
                   React.createElement("span", { className:"text-sm" }, weather.rain?"Raining":"Clear")
                 ),
-                React.createElement("div",{className:"flex items-center gap-2"},
-                  React.createElement(Wind,{className:"h-5 w-5 text-slate-500"}),
-                  React.createElement("span",{className:"text-sm"},`Wind: ${weather.wind} km/h`)
+                React.createElement("div", { className:"flex items-center gap-2" },
+                  React.createElement(Wind, { className:"h-5 w-5 text-slate-500" }),
+                  React.createElement("span", { className:"text-sm" }, `Wind: ${weather.wind} km/h`)
                 ),
-                React.createElement("div",{className:"flex items-center gap-2"},
-                  React.createElement(Sun,{className:"h-5 w-5 text-orange-500"}),
-                  React.createElement("span",{className:"text-sm font-semibold"},`${weather.temp}°C`)
+                React.createElement("div", { className:"flex items-center gap-2" },
+                  React.createElement(Sun, { className:"h-5 w-5 text-orange-500" }),
+                  React.createElement("span", { className:"text-sm font-semibold" }, `${weather.temp}°C`)
                 ),
-                React.createElement("div",{className:"text-xs text-muted-foreground pt-1"},`Location: ${weather.lat}, ${weather.lng}`)
+                React.createElement("div", { className:"text-xs text-muted-foreground pt-1" }, `Location: ${weather.lat}, ${weather.lng}`)
               )
             )
           )
         ),
-        React.createElement("div",{id:"map", ref:mapRef}),
-        timestamps.length > 0 && React.createElement("div",{style:{position:"absolute", bottom:"20px", left:"50%", transform:"translateX(-50%)", width:"80%", zIndex:1000, background:"rgba(0,0,0,0.4)", padding:"10px", borderRadius:"8px", display:"flex", flexDirection:"column", gap:"6px"}},
-          React.createElement(Progress,{value:radarFrame, max:timestamps.length}),
-          React.createElement(Slider,{value:radarFrame, min:0, max:timestamps.length-1, onValueChange: v=> { setRadarFrame(v); if (radarLayer.current) radarLayer.current.setUrl(`https://tilecache.rainviewer.com/v2/radar/${timestamps[v]}/256/{z}/{x}/{y}/2/1_1.png`) } },
-            React.createElement(SliderTrack,null,
-              React.createElement(SliderRange,null)
+        React.createElement("div", { id:"map", ref:mapRef }),
+        // radar progress & slider
+        React.createElement("div", { style:{ position:"absolute", bottom:"10px", left:"50%", transform:"translateX(-50%)", width:"80%", zIndex:1000, display:"flex", flexDirection:"column", gap:"6px", background:"rgba(0,0,0,0.3)", padding:"8px", borderRadius:"8px" }},
+          React.createElement(Progress, { value:(radarTimestamps.length?((radarFrame+1)/radarTimestamps.length*100):0) }),
+          React.createElement(Slider, { value: radarFrame, min:0, max: radarTimestamps.length?radarTimestamps.length-1:0, onValueChange: updateRadarFrame },
+            React.createElement(SliderTrack, null,
+              React.createElement(SliderRange, null)
             ),
-            React.createElement(SliderThumb,null)
-          ),
-          React.createElement("div",{className:"flex gap-2 justify-center"},
-            React.createElement(Button,{onClick:pauseRadar,variant:"outline",className:"flex-1 flex items-center justify-center"},
-              React.createElement(Pause,{className:"h-4 w-4 mr-1"}),"Pause"
-            ),
-            React.createElement(Button,{onClick:resumeRadar,variant:"outline",className:"flex-1 flex items-center justify-center"},
-              React.createElement(Play,{className:"h-4 w-4 mr-1"}),"Play"
-            )
+            React.createElement(SliderThumb, null)
           )
         )
       )
     }
 
     createRoot(document.getElementById("root")).render(
-      React.createElement(App)
+      React.createElement(App, null)
     )
   </script>
 </body>
